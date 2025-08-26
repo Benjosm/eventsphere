@@ -1,0 +1,68 @@
+# EventSphere - Interactive Global Event Visualization Platform
+## 1. High Level Project Design
+A self-contained 3D event visualization platform that renders real-time global events on an interactive globe with AI-driven clustering. Unique value proposition: local ML clustering (no cloud APIs) identifies thematic patterns in event descriptions (e.g., "protest clusters" automatically labeled as "Civil Unrest") while maintaining complete data privacy. Solves the problem of information overload in crisis monitoring by providing intuitive spatial + thematic navigation.
+
+## 2. Architecture & Technology Decisions
+- **Monolith**: Single FastAPI service (no microservice overhead for this scale; avoids 5GB RAM fragmentation)
+- **Backend**: Python 3.11 + FastAPI 0.114.0 + SQLModel 0.0.18 (mypy-type-safe ORM)
+- **Frontend**: React 18 + Vite 5 + @react-three/fiber 8 + Three.js 0.164 (GPU-accelerated via browser)
+- **Data**: Encrypted SQLite via SQLCipher 4.6.1 (pysqlcipher3==1.0.1) - single-file embedded DB with AES-256
+- **ML**: scikit-learn 1.5.1 (MiniBatchKMeans) + joblib 1.4.2 for model persistence (tiny footprint <50MB RAM)
+- **Caching**: In-memory LRU (cachetools 5.4.0) for cluster names (max 100 entries)
+- **Verification**: `poetry check` + `npm ci --no-fund` (manual build), validate SQLCipher via `sqlite3 -header -line db.enc "PRAGMA key='x'270AD5F21B8C4D3E'; SELECT * FROM events;"`
+
+## 3. Security Design
+- **Auth**: Stateless signed JWT in HttpOnly cookies (no user accounts; `/login` generates time-limited token for API access)
+- **Encryption**: SQLCipher for DB at rest (key derived from app secret via PBKDF2)
+- **Input Validation**: Pydantic models with constrained fields (e.g., `conint(gt=0)`, `constr(max_length=200)`)
+- **Verification**: Manual inspection of `security/jwt.py` + unit test with expired/invalid token (expect 401)
+
+## 4. Project Skeleton & File Layout
+```
+/backend
+  main.py           # FastAPI app factory
+  db.py             # SQLCipher connection
+  models.py         # Pydantic + SQLModel definitions
+  clustering.py     # ML pipeline
+/frontend
+  src/
+    components/     # Globe, filters, cluster info panel
+    lib/            # Three.js scene setup
+    store.js        # Zustand state management
+/data
+  events.enc        # Encrypted sample DB (pre-seeded)
+pyproject.toml
+package.json
+```
+**Verification**: `tree -I 'node_modules|.venv'` (manual inspection of structure)
+
+## 5. Module-by-Module Creation Strategy
+- **api.routes.events** (Serve filtered events): `def get_events(start: dt, end: dt, cats: list[str]) -> EventList`; Verify via curl to `/events?start=2024-01-01`
+- **domain.clustering** (ML pipeline): `def generate_clusters(events: list[Event]) -> dict`; Verify by running `python -m domain.clustering` with test data - check console output for cluster names
+- **infra.db.repository** (Data access): `class EventRepository: def get_filtered(...) -> list[Event]`; Verify via unit test with SQLModel mock session
+- **frontend/components/Globe** (3D visualization): React component with `useFrame` hook; Verify by manual browser inspection of dev server (rotate/zoom works)
+
+## 6. Dependency & Build Management
+**Backend pinned deps**:
+fastapi==0.114.0, uvicorn==0.30.6, sqlmodel==0.0.18, pysqlcipher3==1.0.1, scikit-learn==1.5.1
+**Frontend pinned deps**:
+three@0.164.0, @react-three/fiber@8.17.1, drei@9.103.0, vite@5.4.2
+**Build sequence**:
+```bash
+poetry install && poetry run python -m backend.db init && # setup DB
+cd frontend && npm ci && npm run build
+```
+**Verification**: `poetry install` and `npm ci` must exit 0 (manual build)
+
+## 7. Local Simulation & Stubbing Plan
+- **ML Model**: `FakeClusterer` returning static clusters in test mode (activated when `ENV=testing`)
+- **DB Connection**: Override with :memory: SQLite during unit tests
+- **Verification**: Unit test calling `clustering.generate_clusters()` with test events - assert cluster names match expected patterns
+
+## 8. Completion Definition
+- [ ] `poetry run uvicorn backend.main:app --port 8000` runs without errors
+- [ ] `curl http://localhost:8000/docs` returns 200 with OpenAPI JSON
+- [ ] Frontend renders globe at http://localhost:5173 (Vite dev server) with rotating capability
+- [ ] Sample event clusters appear in sidebar when clicking globe
+- [ ] Time/category filters update displayed events
+- [ ] `poetry run pytest` passes all unit tests (ML clustering, DB access, auth)

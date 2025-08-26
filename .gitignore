@@ -1,0 +1,51 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python virtual environment
+.venv/
+
+# IDE and Editor Configuration
+.idea/
+.vscode/
+*.swp
+*~
+.project
+.settings/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Frontend Dependencies
+node_modules/
+
+# Frontend Build Output (Vite)
+dist/
+.vite/
+
+# Python Build Artifacts
+build/
+*.egg-info/
+
+# Test Caches and Reports
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Logs
+*.log
+
+# Environment variables (if used for secrets, though not explicitly in plan)
+# .env
+# .env.*
+
+# Temporary files
+*.tmp
+*.bak
