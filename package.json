@@ -1,0 +1,20 @@
+{
+  "name": "eventsphere",
+  "version": "1.0.0",
+  "description": "EventSphere is a self-contained 3D visualization platform that renders real-time global events on an interactive globe, powered by AI-driven clustering for intelligent thematic navigation. Built for use cases like crisis monitoring and situational awareness, EventSphere processes event data with **local machine learning models**—ensuring complete data privacy with no external API dependencies.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Benjosm/eventsphere.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Benjosm/eventsphere/issues"
+  },
+  "homepage": "https://github.com/Benjosm/eventsphere#readme"
+}
