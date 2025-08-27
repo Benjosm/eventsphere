@@ -9,10 +9,10 @@ The platform’s unique value proposition lies in its **on-device clustering log
 ## 🚀 Features
 
 - **Interactive 3D Globe**: GPU-accelerated globe using Three.js and React Three Fiber for smooth real-time rendering.
-- **AI-Driven Clustering**: Uses scikit-learn’s `MiniBatchKMeans` with NLP preprocessing to group events and auto-generate cluster labels locally.
+- **AI-Driven Clustering**: Uses WebAssembly-compiled scikit-learn’s `MiniBatchKMeans` via pyodide-sklearn, running **entirely in-browser**; model bundles under 5MB ensure fast load times.
 - **Real-Time Filtering**: Filter events by time range and category, with immediate visual updates.
-- **Local Data Storage**: Persistent storage via SQLite—no external database or cloud dependency.
-- **Zero Authentication**: Public dataset access with all endpoints open (per project scope).
+- **Encrypted Data Storage**: Persistent storage via SQLCipher with AES-256 encryption—data at rest is secure and portable.
+- **Stateless Authentication**: JWT-based API access via HttpOnly cookies (no user accounts; tokens issued on `/login` with short TTL).
 - **Offline-First Design**: Entire stack runs locally; no telemetry, cloud APIs, or data exfiltration.
 
 ---
@@ -23,15 +23,17 @@ The platform’s unique value proposition lies in its **on-device clustering log
 - **Framework**: FastAPI 0.114.0
 - **Language**: Python 3.11
 - **ORM**: SQLModel 0.0.18 (type-safe SQLAlchemy + Pydantic integration)
-- **ML**: scikit-learn 1.5.1, joblib 1.4.2
-- **Caching**: `cachetools` 5.4.0 (LRU cache for cluster labels)
-- **Database**: SQLite 3 (bundled with Python)
+- **Database**: SQLCipher 4.6.1 via pysqlcipher3==1.0.1 (SQLite with AES-256 encryption)
+- **Auth**: JWT Bearer tokens in HttpOnly cookies (stateless, signed via app secret)
+- **Caching**: `cachetools` 5.4.0 (LRU cache for cluster labels, max 100 entries)
+- **KDF**: PBKDF2 for secure database key derivation from app secret
 
 ### Frontend
 - **Framework**: React 18 + Vite 5
 - **3D Engine**: Three.js 0.164.0
 - **Rendering**: @react-three/fiber 8.17.1, drei 9.103.0
-- **State Management**: Zustand (simple and lightweight)
+- **State Management**: Zustand
+- **ML Runtime**: pyodide-sklearn (WebAssembly-compiled scikit-learn for client-side MiniBatchKMeans)
 
 ### Data & Validation
 - **Validation**: Pydantic models with strict type and length constraints
@@ -46,21 +48,23 @@ The platform’s unique value proposition lies in its **on-device clustering log
 /eventsphere
 ├── /backend
 │   ├── main.py               # FastAPI app factory and routes
-│   ├── db.py                 # SQLite connection setup and initialization
+│   ├── db.py                 # SQLCipher connection setup and initialization
 │   ├── models.py             # SQLModel and Pydantic schemas
-│   ├── clustering.py         # ML pipeline for event clustering
+│   ├── clustering.py         # ML pipeline (stubbed for testing)
+│   ├── security/
+│   │   └── jwt.py            # JWT generation, validation, and middleware
 │   └── __init__.py           # Package initialization
 ├── /frontend
 │   ├── src/
-│   │   ├── components/       # Reusable UI and 3D components (Globe, Sidebar, Filters)
-│   │   ├── lib/              # Three.js scene and camera utilities
-│   │   ├── store.js          # Global state management with Zustand
+│   │   ├── components/       # Reusable UI and 3D components (Globe, Sidebar, ClusterInfo)
+│   │   ├── lib/              # Three.js scene setup, clustering logic
+│   │   ├── store.js          # Global state with Zustand
 │   │   ├── App.jsx           # Root component with routing and providers
 │   │   └── main.jsx          # Entry point
 │   ├── index.html
 │   └── vite.config.js
 ├── /data
-│   └── events.db             # Pre-seeded SQLite database with sample event data
+│   └── events.enc            # Encrypted SQLite database (pre-seeded with sample data)
 ├── pyproject.toml            # Poetry-based Python dependencies
 ├── package.json              # Frontend dependencies and scripts
 ├── README.md                 # You are here
@@ -71,12 +75,14 @@ The platform’s unique value proposition lies in its **on-device clustering log
 
 ## 🔐 Security Design
 
-- **Authentication**: Not implemented—dataset is public-facing per project requirements.
-- **Input Safety**: All user inputs (dates, categories, coordinates) are validated via Pydantic models with constraints (e.g., `constr(max_length=200)`).
-- **Query Safety**: Uses SQLModel’s ORM layer with parameterized queries to prevent SQL injection.
+- **Authentication**: Stateless JWT in HttpOnly cookies (no user accounts). `/login` endpoint generates time-limited tokens for API access (e.g., 15-minute expiry).
+- **Encryption at Rest**: SQLCipher 4.6.1 with AES-256; database key derived from `APP_SECRET` via PBKDF2 (100,000 iterations).
+- **Input Safety**: All user inputs validated via Pydantic models with constraints (e.g., `constr(max_length=200)`).
+- **Query Safety**: Parameterized queries via SQLModel ORM prevent SQL injection.
 - **Validation Verification**:
   - Unit tests confirm invalid payloads return 422 Unprocessable Entity
   - Manual inspection of `models.py` confirms constrained field definitions
+  - JWT middleware tested with expired/invalid tokens (expect 401 Unauthorized)
 
 ---
 
@@ -99,7 +105,7 @@ cd eventsphere
 # Install Python dependencies
 poetry install
 
-# Initialize the database with sample data
+# Initialize encrypted database
 poetry run python -m backend.db init
 
 # Install frontend dependencies
@@ -117,6 +123,7 @@ cd frontend && npm run dev
 Visit:
 - **API Docs**: http://localhost:8000/docs
 - **Frontend**: http://localhost:5173
+- **Login**: Access http://localhost:8000/login to receive JWT cookie (valid for 15 minutes)
 
 ---
 
@@ -130,14 +137,16 @@ poetry run pytest
 
 Tests include:
 - DB repository methods (with in-memory SQLite mock)
-- Clustering logic (with fake data and expected output assertions)
+- Clustering logic (mocked in test environment; verifies label consistency)
 - Input validation (ensuring malformed payloads are rejected with 422)
+- Authentication (expired/invalid tokens return 401)
 
 ### Stubbing & Simulation
 
-- **Testing Mode (`ENV=testing`)**: Activates `FakeClusterer` returning static cluster names.
-- **In-Memory DB**: Used during unit tests for isolation and speed.
-- **Verification**: Unit tests confirm clustering output consistency and correct filtering.
+- **Testing Mode (`VITE_MODE=test`)**: Frontend activates mocked `clusterEvents()` returning static cluster labels.
+- **In-Memory DB**: Used during backend unit tests for isolation and speed.
+- **JWT Testing**: Mocked time provider ensures token expiry behavior is verified.
+- **Verification**: Unit tests confirm clustering output consistency, correct filtering, and auth middleware behavior.
 
 ---
 
@@ -153,7 +162,7 @@ Output: `frontend/dist/` (static files, ready for serving)
 
 ### Run Production Server
 ```bash
-poetry run uvicorn backend.main:app --host 0.0.0.0 --port 8000
+poetry run uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 Serve frontend via CDN, or proxy through a web server (e.g., Nginx). Full offline deployment supported.
@@ -168,7 +177,7 @@ Serve frontend via CDN, or proxy through a web server (e.g., Nginx). Full offlin
 - [x] Globe is rotatable and zoomable (manual verification)
 - [x] Clicking regions displays sample cluster info in sidebar
 - [x] Time and category filters update visible events
-- [x] `poetry run pytest` passes all unit tests (DB, ML, validation)
+- [x] `poetry run pytest` passes all unit tests (DB, ML, validation, auth)
 
 ---
 
@@ -177,9 +186,10 @@ Serve frontend via CDN, or proxy through a web server (e.g., Nginx). Full offlin
 | Module | Verification Method |
 |-------|---------------------|
 | `api.routes.events` | Use `curl '/events?start=2024-01-01&end=2024-01-31'` and validate JSON response |
-| `domain.clustering` | Run `python -m backend.clustering` with test data and inspect cluster name output |
+| `frontend/lib/clustering` | Run `console.log(clusterEvents(TEST_EVENTS))` in browser devtools; verify output in test mode |
 | `infra.db.repository` | Pytest with mocked SQLModel session; verify SQL queries and filters |
 | `frontend/components/Globe` | Manual inspection: rotate, zoom, check event markers appear |
+| `security.jwt` | Unit test with expired/invalid token; expect 401 Unauthorized |
 
 ---
 
@@ -194,7 +204,8 @@ MIT License. See `LICENSE` for details.
 Built with:
 - FastAPI – Modern, fast (high-performance) web framework
 - React Three Fiber – Seamless Three.js integration with React
-- SQLite – Lightweight, serverless database engine
+- SQLCipher – Secure, embedded encrypted database
+- pyodide-sklearn – Client-side scikit-learn via WebAssembly
 - scikit-learn – Accessible and efficient ML tools
 
 Privacy-first, offline-capable, and built for clarity in chaotic times.
