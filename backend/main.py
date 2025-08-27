@@ -3,45 +3,126 @@ from datetime import datetime, timedelta
 import os
 import json
 from typing import Optional
+from fastapi.logger import logger
+
+# Create FastAPI app
+app = FastAPI(title="EventSphere API")
 
 # Import jose for JWT
 from jose import jwt
 from jose.exceptions import JWTError
 
-# Create FastAPI app
-app = FastAPI(title="EventSphere API")
+# Add CORS middleware
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Set-Cookie"],
+)
 
 # Get secret key from environment variable
-APP_SECRET = os.getenv("APP_SECRET", "your-secret-key-change-in-production")
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 
-# Dependency to get current user from JWT token
-def get_current_user(request: Request):
-    # Extract token from Authorization header
-    auth_header = request.headers.get("Authorization")
-    token = None
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]  # Extract token after "Bearer "
-    else:
-        # Extract token from auth_token cookie
-        token = request.cookies.get("auth_token")
+# Middleware to authenticate JWT from cookie
+class JWTMiddleware:
+    def __init__(self, app):
+        self.app = app
 
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    async def __call__(self, scope, receive, send):
+        # Only process HTTP requests
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-    try:
-        # Decode and verify JWT
-        payload = jwt.decode(token, APP_SECRET, algorithms=["HS256"])
-        # Ensure token is not expired
-        if datetime.utcnow().timestamp() > payload["exp"]:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        return payload
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        request = Request(scope, receive)
+
+        # Skip authentication for /login and health check
+        if request.url.path == "/login" or request.url.path == "/health":
+            await self.app(scope, receive, send)
+            return
+
+        # Extract token from 'token' HttpOnly cookie
+        token = request.cookies.get("token")
+
+        if not token:
+            logger.warning(f"Authentication failed: no token provided for path {request.url.path}")
+            # Send 401 response directly
+            response = Response(
+                content='{"detail": "Not authenticated"}',
+                status_code=401,
+                media_type="application/json"
+            )
+            await response(scope, receive, send)
+            return
+
+        try:
+            # Decode and verify JWT
+            payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+
+            # Ensure token is not expired
+            if datetime.utcnow().timestamp() > payload["exp"]:
+                logger.warning(f"Authentication failed: token expired for path {request.url.path}")
+                response = Response(
+                    content='{"detail": "Not authenticated"}',
+                    status_code=401,
+                    media_type="application/json"
+                )
+                await response(scope, receive, send)
+                return
+
+            # Store user in state for downstream handlers (optional)
+            request.state.user = payload
+            logger.info(f"Successfully authenticated user for path {request.url.path}")
+
+        except JWTError as e:
+            logger.warning(f"Authentication failed: JWT error for path {request.url.path}: {str(e)}")
+            response = Response(
+                content='{"detail": "Not authenticated"}',
+                status_code=401,
+                media_type="application/json"
+            )
+            await response(scope, receive, send)
+            return
+
+        # Proceed with the request
+        await self.app(scope, receive, send)
+
+# Add JWT middleware after CORS
+app.add_middleware(JWTMiddleware)
+
+# Exception handler for JWT errors
+@app.exception_handler(JWTError)
+async def jwt_exception_handler(request: Request, exc: JWTError):
+    # Log the error details
+    logger.warning(f"JWT validation failed: {str(exc)}")
+    return Response(
+        content='{"detail": "Unauthorized"}',
+        status_code=401,
+        media_type="application/json"
+    )
+
+# Exception handler for unauthorized access
+@app.exception_handler(401)
+async def unauthorized_exception_handler(request: Request, exc: HTTPException):
+    logger.warning("Unauthorized access attempt")
+    return Response(
+        content='{"detail": "Unauthorized"}',
+        status_code=401,
+        media_type="application/json"
+    )
 
 # Protected endpoint for testing authentication
 @app.get("/protected")
-def protected_route(current_user: dict = Depends(get_current_user)):
-    return {"message": "Authenticated successfully", "user": current_user}
+def protected_route(request: Request):
+    return {"message": "Authenticated successfully", "user": request.state.user}
+
+# Dependency to get current user
+def get_current_user(request: Request):
+    if not hasattr(request.state, "user"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return request.state.user
 
 @app.post("/login")
 async def login(response: Response):
@@ -60,11 +141,11 @@ async def login(response: Response):
     }
     
     # Generate the JWT token
-    token = jwt.encode(token_data, APP_SECRET, algorithm="HS256")
+    token = jwt.encode(token_data, SECRET_KEY, algorithm="HS256")
     
-    # Set the HttpOnly cookie with the token
+    # Set the HttpOnly cookie with the token using correct name
     response.set_cookie(
-        key="auth_token",
+        key="token",
         value=token,
         path="/",
         httponly=True,
@@ -140,6 +221,20 @@ async def get_events(
     
     # Return events as JSON response
     return events
+
+@app.get("/health")
+def health_check():
+    logger.info("Health check requested")
+    return {"status": "ok"}
+
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Application startup: EventSphere API is starting")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Application shutdown: EventSphere API is stopping")
 
 if __name__ == "__main__":
     import uvicorn
