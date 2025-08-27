@@ -1,6 +1,5 @@
 import os
-import sqlite3
-from pysqlcipher3 import dbapi2 as sqlcipher
+import pysqlcipher3.dbapi2 as sqlite3
 from datetime import datetime
 
 def init_database():
@@ -16,19 +15,25 @@ def init_database():
     db_path = os.getenv('DATABASE_URL', 'app.db')
     
     # Connect to the database (will create if it doesn't exist)
-    conn = sqlcipher.connect(db_path)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # Set the encryption key
-    cursor.execute(f"PRAGMA key = '{encryption_key}'")
+    safe_key = encryption_key.replace("'", "''")
+    # Set encryption key using escaped key
+    cursor.execute(f"PRAGMA key = '{safe_key}';")
+    
+    # Verify encryption is active
+    cursor.execute("SELECT sql FROM sqlite_master;")
+    
+    # The encryption key was already set above
     
     # Create events table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME NOT NULL,
-            latitude REAL NOT NULL,
-            longitude REAL NOT NULL,
+            timestamp TEXT NOT NULL,
+            latitude REAL,
+            longitude REAL,
             description TEXT,
             category TEXT
         )
@@ -68,18 +73,19 @@ def verify_database_integrity():
 
     # Try to connect with correct key
     try:
-        conn = sqlcipher.connect(db_path)
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute(f"PRAGMA key = '{encryption_key}'")
+        safe_key = encryption_key.replace("'", "''")
+        cursor.execute(f"PRAGMA key = '{safe_key}';")
 
         # Verify table schemas
         cursor.execute("PRAGMA table_info(events);")
         events_columns = cursor.fetchall()
         expected_events_columns = [
             ('id', 'INTEGER', 0, '', 1),
-            ('timestamp', 'DATETIME', 1, '', 0),
-            ('latitude', 'REAL', 1, '', 0),
-            ('longitude', 'REAL', 1, '', 0),
+            ('timestamp', 'TEXT', 1, '', 0),
+            ('latitude', 'REAL', 0, '', 0),
+            ('longitude', 'REAL', 0, '', 0),
             ('description', 'TEXT', 0, '', 0),
             ('category', 'TEXT', 0, '', 0)
         ]
@@ -118,7 +124,7 @@ def verify_database_integrity():
 
     # Try to connect without key
     try:
-        conn = sqlcipher.connect(db_path)
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT count(*) FROM events;")
         data = cursor.fetchall()
@@ -129,7 +135,7 @@ def verify_database_integrity():
 
     # Try wrong key
     try:
-        conn = sqlcipher.connect(db_path)
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute(f"PRAGMA key = 'wrong_key';")
         cursor.execute("SELECT count(*) FROM events;")
