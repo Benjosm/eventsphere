@@ -2,7 +2,7 @@
 
 EventSphere is a self-contained 3D visualization platform that renders real-time global events on an interactive globe, powered by AI-driven clustering for intelligent thematic navigation. Built for use cases like crisis monitoring and situational awareness, EventSphere processes event data with **local machine learning models**—ensuring complete data privacy with no external API dependencies.
 
-The platform’s unique value proposition lies in its **on-device clustering logic**, which automatically identifies and labels thematic patterns (e.g., "Civil Unrest", "Natural Disaster") from unstructured event descriptions. All data remains within the encrypted local environment, making EventSphere ideal for sensitive or air-gapped deployments.
+The platform’s unique value proposition lies in its **on-device clustering logic**, which automatically identifies and labels thematic patterns (e.g., "Civil Unrest", "Natural Disaster") from unstructured event descriptions. All data remains within the local environment, making EventSphere ideal for air-gapped or privacy-sensitive deployments.
 
 ---
 
@@ -11,9 +11,9 @@ The platform’s unique value proposition lies in its **on-device clustering log
 - **Interactive 3D Globe**: GPU-accelerated globe using Three.js and React Three Fiber for smooth real-time rendering.
 - **AI-Driven Clustering**: Uses scikit-learn’s `MiniBatchKMeans` with NLP preprocessing to group events and auto-generate cluster labels locally.
 - **Real-Time Filtering**: Filter events by time range and category, with immediate visual updates.
-- **Encrypted Data Storage**: Persistent storage via SQLCipher with AES-256 encryption at rest.
-- **Secure Access**: Stateless JWT authentication over HttpOnly cookies—no user accounts or external identity providers.
-- **Zero Cloud Dependency**: Entire stack runs locally; no telemetry, cloud APIs, or data exfiltration.
+- **Local Data Storage**: Persistent storage via SQLite—no external database or cloud dependency.
+- **Zero Authentication**: Public dataset access with all endpoints open (per project scope).
+- **Offline-First Design**: Entire stack runs locally; no telemetry, cloud APIs, or data exfiltration.
 
 ---
 
@@ -25,8 +25,7 @@ The platform’s unique value proposition lies in its **on-device clustering log
 - **ORM**: SQLModel 0.0.18 (type-safe SQLAlchemy + Pydantic integration)
 - **ML**: scikit-learn 1.5.1, joblib 1.4.2
 - **Caching**: `cachetools` 5.4.0 (LRU cache for cluster labels)
-- **Auth**: PyJWT + custom middleware for signed JWT in HttpOnly cookies
-- **Database**: SQLite encrypted with SQLCipher 4.6.1 (`pysqlcipher3==1.0.1`)
+- **Database**: SQLite 3 (bundled with Python)
 
 ### Frontend
 - **Framework**: React 18 + Vite 5
@@ -34,10 +33,10 @@ The platform’s unique value proposition lies in its **on-device clustering log
 - **Rendering**: @react-three/fiber 8.17.1, drei 9.103.0
 - **State Management**: Zustand (simple and lightweight)
 
-### Data & Security
-- **Encryption**: AES-256 via SQLCipher, key derived using PBKDF2 from app secret
+### Data & Validation
 - **Validation**: Pydantic models with strict type and length constraints
-- **Secure Defaults**: No debug mode in production, input sanitation, rate limiting (future)
+- **Input Sanitization**: All inputs validated using `conint(gt=0)`, `constr(max_length=200)`, etc.
+- **Secure Defaults**: No debug mode in production, parameterized SQL queries, no external API calls
 
 ---
 
@@ -47,39 +46,37 @@ The platform’s unique value proposition lies in its **on-device clustering log
 /eventsphere
 ├── /backend
 │   ├── main.py               # FastAPI app factory and routes
-│   ├── db.py                 # Encrypted database connection setup
+│   ├── db.py                 # SQLite connection setup and initialization
 │   ├── models.py             # SQLModel and Pydantic schemas
 │   ├── clustering.py         # ML pipeline for event clustering
-│   └── security/
-│       └── jwt.py            # JWT creation and validation
+│   └── __init__.py           # Package initialization
 ├── /frontend
 │   ├── src/
-│   │   ├── components/       # Reusable UI and 3D components (Globe, Sidebar)
-│   │   ├── lib/              # Three.js scene and camera setup
-│   │   ├── store.js          # Global state with Zustand
-│   │   └── main.jsx          # App entry point
+│   │   ├── components/       # Reusable UI and 3D components (Globe, Sidebar, Filters)
+│   │   ├── lib/              # Three.js scene and camera utilities
+│   │   ├── store.js          # Global state management with Zustand
+│   │   ├── App.jsx           # Root component with routing and providers
+│   │   └── main.jsx          # Entry point
 │   ├── index.html
 │   └── vite.config.js
 ├── /data
-│   └── events.enc            # Encrypted database (pre-seeded with sample data)
+│   └── events.db             # Pre-seeded SQLite database with sample event data
 ├── pyproject.toml            # Poetry-based Python dependencies
 ├── package.json              # Frontend dependencies and scripts
 ├── README.md                 # You are here
-└── .env.example              # Environment template
+└── .env.example              # Environment template (for future extensions)
 ```
 
 ---
 
 ## 🔐 Security Design
 
-- **Authentication**: Time-limited JWT tokens issued via `/login`, stored in HttpOnly cookies to prevent XSS.
-- **Authorization**: All API endpoints except `/login` and `/docs` require valid tokens.
-- **Data at Rest**: Full database encryption using SQLCipher with 256-bit AES.
-- **Key Management**: Database key derived from app secret using PBKDF2 (salted, 100,000 iterations).
-- **Input Safety**: All inputs validated via Pydantic with constraints (e.g., `constr(max_length=200)`).
-- **Verification**:
-  - Manual code inspection of `security/jwt.py`
-  - Unit tests confirming expired/invalid tokens return 401
+- **Authentication**: Not implemented—dataset is public-facing per project requirements.
+- **Input Safety**: All user inputs (dates, categories, coordinates) are validated via Pydantic models with constraints (e.g., `constr(max_length=200)`).
+- **Query Safety**: Uses SQLModel’s ORM layer with parameterized queries to prevent SQL injection.
+- **Validation Verification**:
+  - Unit tests confirm invalid payloads return 422 Unprocessable Entity
+  - Manual inspection of `models.py` confirms constrained field definitions
 
 ---
 
@@ -102,7 +99,7 @@ cd eventsphere
 # Install Python dependencies
 poetry install
 
-# Initialize encrypted database
+# Initialize the database with sample data
 poetry run python -m backend.db init
 
 # Install frontend dependencies
@@ -134,7 +131,7 @@ poetry run pytest
 Tests include:
 - DB repository methods (with in-memory SQLite mock)
 - Clustering logic (with fake data and expected output assertions)
-- Auth middleware (expired/invalid token handling)
+- Input validation (ensuring malformed payloads are rejected with 422)
 
 ### Stubbing & Simulation
 
@@ -159,7 +156,7 @@ Output: `frontend/dist/` (static files, ready for serving)
 poetry run uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-Serve frontend via CDN, or proxy through a web server (e.g., Nginx).
+Serve frontend via CDN, or proxy through a web server (e.g., Nginx). Full offline deployment supported.
 
 ---
 
@@ -171,7 +168,7 @@ Serve frontend via CDN, or proxy through a web server (e.g., Nginx).
 - [x] Globe is rotatable and zoomable (manual verification)
 - [x] Clicking regions displays sample cluster info in sidebar
 - [x] Time and category filters update visible events
-- [x] `poetry run pytest` passes all unit tests (DB, ML, auth)
+- [x] `poetry run pytest` passes all unit tests (DB, ML, validation)
 
 ---
 
@@ -197,7 +194,7 @@ MIT License. See `LICENSE` for details.
 Built with:
 - FastAPI – Modern, fast (high-performance) web framework
 - React Three Fiber – Seamless Three.js integration with React
-- SQLCipher – Full database encryption
+- SQLite – Lightweight, serverless database engine
 - scikit-learn – Accessible and efficient ML tools
 
-Privacy-first design for a world that needs visibility without compromise.
+Privacy-first, offline-capable, and built for clarity in chaotic times.
