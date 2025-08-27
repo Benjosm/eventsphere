@@ -75,6 +75,72 @@ async def login(response: Response):
     # Return 200 with no response body
     return
 
+# Import the EventsQueryParams model
+from schemas import EventsQueryParams
+
+# Mock repository functions (to be replaced with actual DB implementation)
+async def get_events_by_time_range(start: datetime, end: datetime):
+    # Placeholder for actual database query
+    return []
+
+async def get_events_by_category(categories: list):
+    # Placeholder for actual database query  
+    return []
+
+async def get_events_by_time_and_category(start: datetime, end: datetime, categories: list):
+    # Placeholder for actual database query
+    return []
+
+@app.get("/events")
+async def get_events(
+    response: Response,
+    query_params: EventsQueryParams = Depends(),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    GET endpoint for /events with time range and category filtering.
+    
+    Validates query parameters through Pydantic model and calls appropriate repository method based on filters.
+    Returns 200 with events list on success, appropriate error codes otherwise.
+    """
+    # Parse categories if provided
+    categories = None
+    if query_params.cats:
+        categories = [cat.strip() for cat in query_params.cats.split(",") if cat.strip()]
+        if not categories:
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid categories parameter: must contain at least one non-empty category"
+            )
+    
+    # Parse datetime strings if provided
+    start_dt = None
+    end_dt = None
+    if query_params.start and query_params.end:
+        # Handle Z suffix for UTC
+        start_str = query_params.start.replace('Z', '+00:00')
+        end_str = query_params.end.replace('Z', '+00:00')
+        start_dt = datetime.fromisoformat(start_str)
+        end_dt = datetime.fromisoformat(end_str)
+    
+    # Determine which filters are present
+    has_time_filter = start_dt is not None and end_dt is not None
+    has_category_filter = categories is not None
+    
+    # Call appropriate repository method based on filters
+    if has_time_filter and has_category_filter:
+        events = await get_events_by_time_and_category(start_dt, end_dt, categories)
+    elif has_time_filter:
+        events = await get_events_by_time_range(start_dt, end_dt)
+    elif has_category_filter:
+        events = await get_events_by_category(categories)
+    else:
+        # This should not happen due to Pydantic validation, but handle defensively
+        raise HTTPException(status_code=422, detail="At least one filter must be provided")
+    
+    # Return events as JSON response
+    return events
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
