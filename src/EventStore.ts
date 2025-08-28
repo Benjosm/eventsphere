@@ -34,14 +34,33 @@ class EventsDatabase extends Dexie {
 
 export class EventStore {
   private db: EventsDatabase;
+  private static instance: EventStore;
 
-  constructor() {
+  private constructor() {
     if (!window.indexedDB) {
-      throw new Error('IndexedDB is not supported in this browser.');
+      console.warn('IndexedDB is not supported in this browser. Running in degraded (in-memory) mode.');
+      this.db = new EventsDatabase();
+      // Will use in-memory store as fallback
+      return;
     }
-
+  
     this.db = new EventsDatabase();
     localForage.setDriver(localForage.INDEXEDDB);
+  
+    // Attempt to open the database to detect runtime errors (e.g., private mode)
+    this.db.on('error', (error) => {
+      console.warn('EventStore initialization error:', error);
+      if (error.name === 'OpenFailed' || error.message.includes('blocked') || error.message.includes('version')) {
+        console.warn('Falling back to in-memory mode due to initialization failure.');
+      }
+    });
+  }
+
+  public static getInstance(): EventStore {
+    if (!EventStore.instance) {
+      EventStore.instance = new EventStore();
+    }
+    return EventStore.instance;
   }
 
   private async reinitialize(): Promise<void> {
@@ -60,7 +79,7 @@ export class EventStore {
     );
   }
 
-  async create(event: Event): Promise<void> {
+  async append(event: Event): Promise<void> {
     EventSchema.parse(event);
     try {
       await this.db.transaction('rw', this.db.events, async () => {
@@ -69,13 +88,44 @@ export class EventStore {
     } catch (error) {
       if (this.isCorruptionError(error)) {
         await this.reinitialize();
-        return this.create(event);
+        return this.append(event);
       }
-      throw error;
+      console.error('Failed to append event:', error);
+      throw new Error(`EventStore.append() failed: ${(error as Error).message}`);
     }
   }
 
-  async createMany(events: Event[]): Promise<void> {
+  async read(streamId: string): Promise<Event | undefined> {
+    try {
+      return await this.db.transaction('r', this.db.events, async () => {
+        return await this.db.events.get(streamId);
+      });
+    } catch (error) {
+      if (this.isCorruptionError(error)) {
+        await this.reinitialize();
+        return this.read(streamId);
+      }
+      console.error('Failed to read event:', error);
+      throw new Error(`EventStore.read() failed: ${(error as Error).message}`);
+    }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      await this.db.transaction('rw', this.db.events, async () => {
+        await this.db.events.clear();
+      });
+    } catch (error) {
+      if (this.isCorruptionError(error)) {
+        await this.reinitialize();
+        return this.clear();
+      }
+      console.error('Failed to clear events:', error);
+      throw new Error(`EventStore.clear() failed: ${(error as Error).message}`);
+    }
+  }
+
+  async appendMany(events: Event[]): Promise<void> {
     const validEvents = events.map(event => {
       EventSchema.parse(event);
       return event;
@@ -88,26 +138,29 @@ export class EventStore {
     } catch (error) {
       if (this.isCorruptionError(error)) {
         await this.reinitialize();
-        return this.createMany(validEvents);
+        return this.appendMany(validEvents);
       }
       throw error;
     }
   }
 
-  async read(id: string): Promise<Event | undefined> {
-    try {
-      return await this.db.transaction('r', this.db.events, async () => {
-        return await this.db.events.get(id);
-      });
-    } catch (error) {
-      if (this.isCorruptionError(error)) {
-        await this.reinitialize();
-        return this.read(id);
-      }
-      throw error;
-    }
+  // Keep the old methods for backward compatibility, marked as deprecated
+  /** @deprecated Use append() instead */
+  async create(event: Event): Promise<void> {
+    return this.append(event);
   }
 
+  /** @deprecated Use appendMany() instead */
+  async createMany(events: Event[]): Promise<void> {
+    return this.appendMany(events);
+  }
+
+  /** @deprecated Use read() instead */
+  async readById(id: string): Promise<Event | undefined> {
+    return this.read(id);
+  }
+
+  /** @deprecated Use update() instead */
   async update(id: string, partialEvent: Partial<Event>): Promise<void> {
     try {
       const existing = await this.read(id);
@@ -128,6 +181,7 @@ export class EventStore {
     }
   }
 
+  /** @deprecated Use delete() instead */
   async delete(id: string): Promise<void> {
     try {
       await this.db.transaction('rw', this.db.events, async () => {
@@ -142,3 +196,7 @@ export class EventStore {
     }
   }
 }
+
+// Initialize the singleton instance
+const eventStore = EventStore.getInstance();
+export default eventStore;
