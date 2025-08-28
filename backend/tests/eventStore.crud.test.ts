@@ -126,4 +126,55 @@ describe('EventStore', () => {
       expect(await (eventStore as any).db.events.count()).toBe(0);
     });
   });
+
+  describe('Clear operation', () => {
+    it('should clear all events from the database', async () => {
+      // Create some events
+      const events = Array.from({ length: 3 }, (_, i) => ({
+        id: uuidv4(),
+        title: `Event ${i}`,
+        category: 'work' as EventCategory,
+        latitude: 40.7128,
+        longitude: -74.0060,
+        timestamp: Date.now() + i
+      }));
+
+      await eventStore.createMany(events);
+      expect(await (eventStore as any).db.events.count()).toBe(3);
+
+      // Clear the database
+      await eventStore.clear();
+      expect(await (eventStore as any).db.events.count()).toBe(0);
+    });
+
+    it('should work on empty database', async () => {
+      // Ensure database is empty
+      await eventStore.clear();
+      expect(await (eventStore as any).db.events.count()).toBe(0);
+
+      // Clear should succeed on empty database
+      await expect(eventStore.clear()).resolves.not.toThrow();
+      expect(await (eventStore as any).db.events.count()).toBe(0);
+    });
+
+    it('should work after creating and reading events', async () => {
+      const event = {
+        id: uuidv4(),
+        title: 'Test Event',
+        category: 'work' as EventCategory,
+        latitude: 40.7128,
+        longitude: -74.0060,
+        timestamp: Date.now()
+      };
+
+      // Create and read an event
+      await eventStore.create(event);
+      const stored = await eventStore.read(event.id);
+      expect(stored).toEqual(event);
+
+      // Clear should still work
+      await eventStore.clear();
+      expect(await (eventStore as any).db.events.count()).toBe(0);
+    });
+  });
 });
