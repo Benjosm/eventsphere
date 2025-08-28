@@ -1,0 +1,1 @@
+import { validateEvent } from './validation';\n\nexport class EventStore {\n  private events: any[] = [];\n\n  storeEvent(event: unknown): void {\n    // Enforce schema validation before storage\n    const validatedEvent = validateEvent(event);\n    this.events.push(validatedEvent);\n  }\n\n  getEvents(): any[] {\n    return this.events;\n  }\n}\n

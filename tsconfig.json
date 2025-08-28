@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    // Enable modern TypeScript features
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    
+    // Allow importing modules without strict file extensions
+    "allowSyntheticDefaultImports": true,
+    
+    // Enable interoperability between CommonJS and ES modules
+    "esModuleInterop": true,
+    
+    // Type checking options
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    
+    // Module resolution
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    
+    // Output options
+    "outDir": "./dist",
+    "rootDir": "./",
+    
+    // Emit decorator metadata
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    
+    // Source map generation
+    "sourceMap": true
+  },
+  "include": [
+    "backend/**/*.ts",
+    "backend/tests/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

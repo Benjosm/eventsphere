@@ -2,7 +2,7 @@ from fastapi import FastAPI, Response, HTTPException, Depends, Request
 from datetime import datetime, timedelta
 import os
 import json
-from typing import Optional
+from typing import Optional, List
 from fastapi.logger import logger
 
 # Create FastAPI app
@@ -156,21 +156,26 @@ async def login(response: Response):
     # Return 200 with no response body
     return
 
-# Import the EventsQueryParams model
-from schemas import EventsQueryParams
+# Import the EventsQueryParams and EventModel models
+from schemas import EventsQueryParams, EventModel
 
 # Mock repository functions (to be replaced with actual DB implementation)
 async def get_events_by_time_range(start: datetime, end: datetime):
     # Placeholder for actual database query
     return []
 
-async def get_events_by_category(categories: list):
+async def get_events_by_category(categories: List[str]):
     # Placeholder for actual database query  
     return []
 
-async def get_events_by_time_and_category(start: datetime, end: datetime, categories: list):
+async def get_events_by_time_and_category(start: datetime, end: datetime, categories: List[str]):
     # Placeholder for actual database query
     return []
+
+async def store_event(event: EventModel):
+    # Placeholder for actual database storage
+    # In a real implementation, this would store the event in a database
+    return {"status": "success", "event_id": event.id}
 
 @app.get("/events")
 async def get_events(
@@ -221,6 +226,19 @@ async def get_events(
     
     # Return events as JSON response
     return events
+
+@app.post("/events")
+async def create_event(
+    event: EventModel,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    POST endpoint for creating a new event.
+    Uses EventModel for automatic validation of incoming payload.
+    Returns 200 with success message and event ID on successful storage.
+    """
+    result = await store_event(event)
+    return result
 
 @app.get("/health")
 def health_check():
