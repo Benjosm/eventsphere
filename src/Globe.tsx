@@ -103,13 +103,71 @@ const Globe = () => {
   // Create InstancedMesh for individual markers
   const markerRef = useRef<THREE.InstancedMesh>(null!);
   const markerGeometry = useMemo(() => new THREE.ConeGeometry(0.01, 0.05, 8), []);
-  const markerMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: 0xff0000 }), []);
+  
+  // Define cluster colors for visual differentiation
+  const clusterColors: Record<string, number> = {
+    'EU': 0x0066cc, // Europe - Blue
+    'AS': 0xcc6600, // Asia - Orange
+    'AF': 0x009900, // Africa - Green
+    'IN': 0xcc0066, // Indian Subcontinent - Pink
+    'NA': 0xcc9900, // North America - Brown
+    'SA': 0x6600cc, // South America - Purple
+    'OC': 0x00cccc, // Oceania - Cyan
+    'CA': 0xcccc00, // Central America & Caribbean - Yellow
+    'AR': 0x999999, // Arctic - Gray
+    'OT': 0x666666  // Other - Dark Gray
+  };
+
+  // Create a material instance that supports per-instance coloring
+  const markerMaterial = useMemo(() => 
+    new THREE.MeshBasicMaterial({
+      color: 0xff0000,
+      vertexColors: true,
+      side: THREE.DoubleSide
+    }), []);
+
+  // Create a map to associate event IDs with their cluster IDs
+  const eventClusterMap = useMemo(() => {
+    const map = new Map<string, string>();
+    clusters.forEach(cluster => {
+      cluster.coordinates.forEach(coord => {
+        if (coord.eventId) {
+          map.set(coord.eventId, cluster.clusterId);
+        }
+      });
+    });
+    return map;
+  }, [clusters]);
+
+  // Initialize marker colors when marker mesh is created
+  useEffect(() => {
+    if (markerRef.current && !markerRef.current.instanceColor) {
+      // Initialize instance color attribute with default red color
+      const colors = new Float32Array(markerRef.current.count * 3);
+      // Initialize all instances to red (fallback color)
+      for (let i = 0; i < markerRef.current.count; i++) {
+        colors[i * 3] = 1;     // r
+        colors[i * 3 + 1] = 0; // g
+        colors[i * 3 + 2] = 0; // b
+      }
+      markerRef.current.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+      markerRef.current.instanceColor.needsUpdate = true;
+    }
+  }, []);
   
   // Create InstancedMesh for markers
   useEffect(() => {
     if (markerRef.current) return; // Already initialized
   
+    // Create instance color attribute with default values
+    const colors = new Float32Array(10000 * 3);
+    for (let i = 0; i < 10000 * 3; i++) {
+      colors[i] = 0; // Initialize to black (will be updated later)
+    }
+    const instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+    
     const instancedMesh = new THREE.InstancedMesh(markerGeometry, markerMaterial, 10000);
+    instancedMesh.instanceColor = instanceColor;
     instancedMesh.frustumCulled = false;
     scene.add(instancedMesh);
     markerRef.current = instancedMesh;
@@ -118,7 +176,16 @@ const Globe = () => {
       if (markerRef.current) {
         scene.remove(markerRef.current);
         markerRef.current.geometry.dispose();
-        markerRef.current.material.dispose();
+        if (markerRef.current.material) {
+          if (Array.isArray(markerRef.current.material)) {
+            markerRef.current.material.forEach(material => material.dispose());
+          } else {
+            markerRef.current.material.dispose();
+          }
+        }
+        if (markerRef.current.instanceColor) {
+          markerRef.current.instanceColor.dispose();
+        }
         markerRef.current = null!;
       }
     };
@@ -231,30 +298,56 @@ const Globe = () => {
       markerMaterial.dispose();
     };
   }, []);
-
-  // Update markers when events change
+  
+  // Log successful initialization
+  useEffect(() => {
+    console.log("Globe operational");
+  }, []);
+  
+  // Update markers when events or clusters change
   useEffect(() => {
     if (!markerRef.current) return;
   
     const dummy = new THREE.Object3D();
     let instanceId = 0;
   
+    // Update marker positions and colors
     events.forEach(event => {
       const position = CoordinateConversionService.convertToSpherical(
         event.latitude,
         event.longitude
       );
       if (position !== null) {
+        // Update position
         dummy.position.copy(position).multiplyScalar(1.01);
         dummy.updateMatrix();
         markerRef.current.setMatrixAt(instanceId, dummy.matrix);
+        
+        // Get cluster ID for this event
+        const clusterId = eventClusterMap.get(event.id) || 'OT';
+        const color = clusterColors[clusterId] || 0xff0000;
+        
+        // Update color for this instance
+        if (markerRef.current.instanceColor) {
+          const threeColor = new THREE.Color(color);
+          markerRef.current.instanceColor.setXYZ(
+            instanceId,
+            threeColor.r,
+            threeColor.g,
+            threeColor.b
+          );
+        }
+        
         instanceId++;
       }
     });
   
     markerRef.current.count = instanceId;
     markerRef.current.instanceMatrix.needsUpdate = true;
-  }, [events]);
+    if (markerRef.current.instanceColor) {
+      markerRef.current.instanceColor.needsUpdate = true;
+    }
+  }, [events, eventClusterMap, clusterColors]);
 
   return (
     <>

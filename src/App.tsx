@@ -12,6 +12,7 @@ const App = () => {
         <>
           <StatsPanel />
           <PerformanceTestTool />
+          <FrameRateMonitor />
         </>
       )}
     </Canvas>

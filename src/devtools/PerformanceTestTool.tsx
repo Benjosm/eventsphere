@@ -78,9 +78,8 @@ const PerformanceTestTool = () => {
     if (import.meta.env.DEV) {
       // Delay slightly to allow app to initialize
       const timeoutId = setTimeout(() => {
-        if (confirm('Load 5000 test events for performance testing?')) {
-          loadTestEvents();
-        }
+        console.log('AUTO-STARTING Performance Test: Loading 5000 events...');
+        loadTestEvents();
       }, 1000);
 
       return () => clearTimeout(timeoutId);
