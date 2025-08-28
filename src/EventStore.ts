@@ -556,7 +556,7 @@ export class EventStore {
     try {
       // Get all events
       const events = await this.list();
-
+  
       // Convert Event[] to AugmentedEvent[]. For now, we add default augmentation fields.
       const augmentedEvents: AugmentedEvent[] = events.map(event => ({
         ...event,
@@ -565,7 +565,7 @@ export class EventStore {
         vector: Array(128).fill(0).map(() => Math.random())
         // Other fields (clusterId, region, analysisMetadata) are optional and can be undefined
       }));
-
+  
       // Validate each augmented event before clustering
       const validAugmentedEvents: AugmentedEvent[] = [];
       for (const augmentedEvent of augmentedEvents) {
@@ -576,13 +576,13 @@ export class EventStore {
           console.error(`Skipping invalid event ${augmentedEvent.id} during clustering:`, validationError);
         }
       }
-
+  
       // Output the augmented event data for validation just before clustering
       console.log('Valid Augmented Events before clustering:', validAugmentedEvents);
-
+  
       // Use the new function designed for AugmentedEvent objects
       const clusters = clusterAugmentedEvents(validAugmentedEvents);
-
+  
       // Store cluster assignments back to events
       for (const cluster of clusters) {
         for (const coord of cluster.coordinates) {
@@ -598,12 +598,34 @@ export class EventStore {
           }
         }
       }
-
+  
       // Return the clustering results
       return clusters;
     } catch (error) {
       console.error('Failed to cluster events:', error);
       throw new Error(`EventStore.clusterEvents() failed: ${(error as Error).message}`);
+    }
+  }
+  
+  /**
+   * Updates the cluster membership of events based on AI-generated clustering results.
+   * This method is used to persist cluster assignments from the AIClustering Epic to the event store.
+   *
+   * @param clusteringResults - The cluster membership assignments from the AIClustering Epic
+   * @returns Promise that resolves when all updates are complete
+   */
+  async updateClusterAssignments(clusteringResults: ClusteringResult): Promise<void> {
+    try {
+      // Process each cluster and update the clusterId for each event
+      for (const cluster of clusteringResults.clusters) {
+        for (const eventId of cluster.eventIds) {
+          // Update the event with its assigned clusterId
+          await this.update(eventId, { clusterId: cluster.id });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to update cluster assignments:', error);
+      throw new Error(`EventStore.updateClusterAssignments() failed: ${(error as Error).message}`);
     }
   }
 }
