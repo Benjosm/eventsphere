@@ -18,6 +18,7 @@ export interface ClusterResult {
   clusterId: string;
   label: string;
   coordinates: GeoCoordinate[];
+  eventIds: string[];
   center: { latitude: number; longitude: number };
 }
 
@@ -94,6 +95,26 @@ export function clusterCoordinates(coordinates: GeoCoordinate[]): ClusterResult[
   }
 
   return Array.from(clusters.values());
+}
+
+/**
+ * Groups AugmentedEvent objects into spatial clusters.
+ * This function adapts the AugmentedEvent[] input to the GeoCoordinate format
+ * expected by the core clustering algorithm, preserving all event data.
+ * 
+ * @param events - Array of AugmentedEvent objects to cluster
+ * @returns Array of ClusterResult objects, where coordinates contain eventId references
+ */
+export function clusterAugmentedEvents(events: AugmentedEvent[]): ClusterResult[] {
+  // Convert AugmentedEvent array to GeoCoordinate array for clustering
+  const coordinates: GeoCoordinate[] = events.map(event => ({
+    latitude: event.latitude,
+    longitude: event.longitude,
+    eventId: event.id
+  }));
+
+  // Use the core algorithm to perform the clustering
+  return clusterCoordinates(coordinates);
 }
 
 /**
