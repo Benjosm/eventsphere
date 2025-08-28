@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useLoader } from '@react-three/drei';
 import { CoordinateConversionService } from './utils/CoordinateConversionService';
+import useOrbitControls from './hooks/useOrbitControls';
 
 const Globe = () => {
   // Create the sphere geometry with radius 1, 64 width segments, and 64 height segments
@@ -26,6 +27,7 @@ const Globe = () => {
   const meshRef = useRef<THREE.Mesh>(null!);
 
   const { scene } = useThree();
+  useOrbitControls(true);
 
   // Simulate event data with sample coordinates (in a real app, this would come from the EventDataManagement Epic)
   const eventData = [
@@ -90,7 +92,9 @@ const Globe = () => {
   }, [scene]);
 
   return (
-    <mesh ref={meshRef} geometry={geometry} material={material} />
+    <>
+      <mesh ref={meshRef} geometry={geometry} material={material} />
+    </>
   );
 };
 
