@@ -11,7 +11,11 @@ module.exports = {
   // The glob patterns Jest uses to detect test files
   testMatch: [
     '**/backend/tests/**/*.test.ts',
-    '**/backend/tests/**/*.spec.ts'
+    '**/backend/tests/**/*.spec.ts',
+    '**/src/**/*.test.ts',
+    '**/src/**/*.test.tsx',
+    '**/src/**/*.spec.ts',
+    '**/src/**/*.spec.tsx'
   ],
 
   // A map from regular expressions to paths to modules that will load modules for the given patterns
