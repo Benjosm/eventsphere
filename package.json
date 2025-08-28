@@ -10,9 +10,12 @@
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
+    "@types/uuid": "^10.0.0",
+    "fake-indexeddb": "^6.1.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.2",
-    "typescript": "^5.1.6"
+    "typescript": "^5.1.6",
+    "uuid": "^11.1.0"
   },
   "repository": {
     "type": "git",
@@ -26,6 +29,8 @@
   },
   "homepage": "https://github.com/Benjosm/eventsphere#readme",
   "dependencies": {
+    "dexie": "^4.0.8",
+    "localforage": "^1.10.0",
     "zod": "^4.1.4"
   }
 }

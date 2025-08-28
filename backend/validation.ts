@@ -1,11 +1,26 @@
 import { z } from 'zod';
 
-// Define the Event schema using Zod
-const EventSchema = z.object({
+// Define the Event interface that matches our application data structure
+export interface Event {
+  id: string;
+  title: string;
+  category: 'natural_disaster' | 'political' | 'health' | 'other';
+  latitude: number;
+  longitude: number;
+  /**
+   * ISO 8601 datetime string (e.g., "2023-08-27T10:00:00.000Z")
+   */
+  timestamp: number;
+}
+
+// Define the Event schema using Zod for validation
+export const EventSchema = z.object({
   id: z.string(),
-  type: z.string(),
-  timestamp: z.string().datetime(),
-  data: z.record(z.string(), z.unknown())
+  title: z.string(),
+  category: z.enum(['natural_disaster', 'political', 'health', 'other']),
+  latitude: z.number(),
+  longitude: z.number(),
+  timestamp: z.number()
 }).strict();
 
 export function validateEvent(event: unknown) {
@@ -20,5 +35,3 @@ export function validateEvent(event: unknown) {
     throw error;
   }
 }
-
-export { EventSchema };
