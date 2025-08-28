@@ -3,7 +3,7 @@ import Dexie from 'dexie';
 import localForage from 'localforage';
 import { EventSchema } from '../backend/validation';
 import { encryptEvent, decryptEvent, EncryptedEventData } from './utils/encryption';
-import { clusterCoordinates, GeoCoordinate } from './utils/SpatialClusteringService';
+import { clusterCoordinates, GeoCoordinate, ClusterResult as SpatialClusterResult } from './utils/SpatialClusteringService';
 
 /**
  * The category of the event.
@@ -21,6 +21,11 @@ export interface Event {
   longitude: number;
   timestamp: number;
 }
+
+/**
+ * Represents a cluster of events
+ */
+export type ClusterResult = SpatialClusterResult;
 
 class EventsDatabase extends Dexie {
   public events: Dexie.Table<Event, string>;

@@ -3,8 +3,9 @@ import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useLoader } from '@react-three/drei';
 import { CoordinateConversionService } from './utils/CoordinateConversionService';
-import { EventStore, Event } from './EventStore';
+import { EventStore, Event, ClusterResult } from './EventStore';
 import useOrbitControls from './hooks/useOrbitControls';
+import { clusterCoordinates, ClusterResult as SpatialClusterResult } from './utils/SpatialClusteringService';
 
 const Globe = () => {
   // Create the sphere geometry with radius 1, 64 width segments, and 64 height segments
@@ -51,13 +52,15 @@ const Globe = () => {
   }, [scene, camera]);
   
   const [events, setEvents] = useState<Event[]>([]);
-
+  const [clusters, setClusters] = useState<ClusterResult[]>([]);
+  
   // Subscribe to real-time event data stream
   useEffect(() => {
     const eventStore = EventStore.getInstance();
   
-    // Load initial events
-    eventStore.list().then(initialEvents => {
+    // Load initial events and cluster them
+    const loadAndClusterEvents = async () => {
+      const initialEvents = await eventStore.list();
       const validEvents = initialEvents.filter(event => {
         return (
           event.latitude >= -90 &&
@@ -67,7 +70,13 @@ const Globe = () => {
         );
       });
       setEvents(validEvents);
-    });
+      
+      // Cluster the events
+      const clusteredResult = await eventStore.clusterEvents();
+      setClusters(clusteredResult);
+    };
+  
+    loadAndClusterEvents();
   
     // Subscribe to new events
     const unsubscribe = eventStore.subscribe(event => {
@@ -78,19 +87,25 @@ const Globe = () => {
         event.longitude <= 180
       ) {
         setEvents(prevEvents => [...prevEvents, event]);
+        
+        // Recalculate clusters with new event
+        const updatedEvents = [...events, event];
+        const eventStore = EventStore.getInstance();
+        eventStore.clusterEvents().then(clusteredResult => {
+          setClusters(clusteredResult);
+        });
       }
     });
   
     return () => unsubscribe();
-  }, []);
+  }, [events]);
   
-  // Create InstancedMesh for markers
+  // Create InstancedMesh for individual markers
   const markerRef = useRef<THREE.InstancedMesh>(null!);
-  
   const markerGeometry = useMemo(() => new THREE.ConeGeometry(0.01, 0.05, 8), []);
   const markerMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: 0xff0000 }), []);
   
-  // Create InstancedMesh once
+  // Create InstancedMesh for markers
   useEffect(() => {
     if (markerRef.current) return; // Already initialized
   
@@ -108,6 +123,106 @@ const Globe = () => {
       }
     };
   }, [scene, markerGeometry, markerMaterial]);
+  
+  // Create visual representations for clusters
+  const clusterGroupRef = useRef(new THREE.Group());
+  
+  // Create cluster visualization meshes
+  const {
+    clusterSphereGeometry,
+    clusterSphereMaterial,
+    clusterRingGeometry,
+    clusterRingMaterial
+  } = useMemo(() => {
+    // Sphere geometry for cluster representation
+    const clusterSphereGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+    
+    // Semi-transparent material for cluster sphere
+    const clusterSphereMaterial = new THREE.MeshBasicMaterial({
+      color: 0x0088ff,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+      depthTest: true,
+      renderOrder: -1
+    });
+    
+    // Ring geometry for cluster emphasis
+    const clusterRingGeometry = new THREE.RingGeometry(0.08, 0.09, 32);
+    
+    // Material for cluster ring
+    const clusterRingMaterial = new THREE.MeshBasicMaterial({
+      color: 0x0088ff,
+      transparent: true,
+      opacity: 0.6,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      renderOrder: -1
+    });
+    
+    return {
+      clusterSphereGeometry,
+      clusterSphereMaterial,
+      clusterRingGeometry,
+      clusterRingMaterial
+    };
+  }, []);
+  
+  // Update clusters visualization when clusters change
+  useEffect(() => {
+    // Clear existing cluster visuals
+    while (clusterGroupRef.current.children.length) {
+      const child = clusterGroupRef.current.children[0];
+      clusterGroupRef.current.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(material => material.dispose());
+        } else {
+          child.material.dispose();
+        }
+      }
+    }
+    
+    // Create new cluster visuals
+    clusters.forEach(cluster => {
+      // Calculate cluster position from center coordinates
+      const position = CoordinateConversionService.convertToSpherical(
+        cluster.center.latitude,
+        cluster.center.longitude
+      );
+      
+      if (position !== null) {
+        // Scale sphere based on cluster size (number of events)
+        const scale = Math.log(cluster.coordinates.length) * 0.01 + 0.03; // Logarithmic scaling
+        
+        // Create cluster sphere
+        const sphereMesh = new THREE.Mesh(clusterSphereGeometry, clusterSphereMaterial);
+        sphereMesh.position.copy(position).multiplyScalar(1.02);
+        sphereMesh.scale.set(scale, scale, scale);
+        clusterGroupRef.current.add(sphereMesh);
+        
+        // Create cluster ring
+        const ringMesh = new THREE.Mesh(clusterRingGeometry, clusterRingMaterial);
+        ringMesh.position.copy(position).multiplyScalar(1.01);
+        
+        // Align ring to globe surface (tangent plane)
+        const normal = position.clone().normalize();
+        const up = new THREE.Vector3(0, 1, 0);
+        ringMesh.quaternion.setFromUnitVectors(up, normal);
+        
+        clusterGroupRef.current.add(ringMesh);
+      }
+    });
+    
+    // Add cluster group to scene
+    scene.add(clusterGroupRef.current);
+    
+    // Cleanup
+    return () => {
+      scene.remove(clusterGroupRef.current);
+    };
+  }, [clusters, scene, clusterSphereGeometry, clusterSphereMaterial, clusterRingGeometry, clusterRingMaterial]);
 
   // Cleanup memoized resources when component unmounts
   useEffect(() => {
