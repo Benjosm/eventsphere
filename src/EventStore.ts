@@ -3,12 +3,16 @@ import Dexie from 'dexie';
 import localForage from 'localforage';
 import { EventSchema } from '../backend/validation';
 import { encryptEvent, decryptEvent, EncryptedEventData } from './utils/encryption';
-import { clusterCoordinates, GeoCoordinate, ClusterResult as SpatialClusterResult } from './utils/SpatialClusteringService';
+import { clusterCoordinates, GeoCoordinate, ClusterResult as SpatialClusterResult, clusterAugmentedEvents } from './utils/SpatialClusteringService';
 
 /**
  * The category of the event.
  */
 export type EventCategory = 'natural_disaster' | 'political' | 'health' | 'other';
+
+// Import the AugmentedEvent interface and validation function
+import { AugmentedEvent } from './types';
+import { validateAugmentedEvent } from './utils/eventValidation';
 
 /**
  * Represents a user-created event in the application.
@@ -40,16 +44,16 @@ class EventsDatabase extends Dexie {
     }).upgrade(async trans => {
       // Get the current instance of EventsDatabase to access the encryption key
       const existingInstance = EventStore.getInstance();
-      
+
       // Get encryption key
       const key = await existingInstance.getEncryptionKey();
-      
+
       // Retrieve all existing events from the old schema
       const oldEvents = await trans.table('events').toArray();
-      
+
       // Clear the existing data
       await trans.table('events').clear();
-      
+
       // Encrypt each event and store in the new format
       for (const oldEvent of oldEvents) {
         // Create a complete Event object with inferred default values where needed
@@ -61,23 +65,23 @@ class EventsDatabase extends Dexie {
           longitude: oldEvent.longitude,
           timestamp: oldEvent.timestamp || Date.now()
         };
-        
+
         try {
           EventSchema.parse(completeEvent);
         } catch (e) {
           console.warn(`Skipping event ${oldEvent.id} during migration: invalid data`, e);
           continue;
         }
-        
+
         // Extract non-sensitive fields for indexing
         const { id, timestamp, latitude, longitude } = completeEvent;
-        
+
         // Encrypt only sensitive fields
         const encrypted = await encryptEvent(
           { title: completeEvent.title, category: completeEvent.category },
           key
         );
-        
+
         // Store with both unencrypted indexing fields and encrypted data
         await trans.table('events').add({
           id,
@@ -88,6 +92,9 @@ class EventsDatabase extends Dexie {
           iv: encrypted.iv
         });
       }
+    });
+    this.version(3).stores({
+      events: 'id,timestamp,latitude,longitude,clusterId,encryptedData,iv'
     });
     this.events = this.table('events');
   }
@@ -105,10 +112,10 @@ export class EventStore {
       // Will use in-memory store as fallback
       return;
     }
-  
+
     this.db = new EventsDatabase();
     localForage.setDriver(localForage.INDEXEDDB);
-  
+
     // Attempt to open the database to detect runtime errors (e.g., private mode)
     this.db.on('error', (error) => {
       console.warn('EventStore initialization error:', error);
@@ -120,7 +127,7 @@ export class EventStore {
 
   private async getEncryptionKey(): Promise<CryptoKey> {
     if (this.encryptionKey) return this.encryptionKey;
-    
+
     try {
       const storedKey = await localForage.getItem('event_encryption_key');
       if (storedKey) {
@@ -175,7 +182,7 @@ export class EventStore {
     EventSchema.parse(event);
     try {
       const key = await this.getEncryptionKey();
-      
+
       // Separate sensitive and non-sensitive fields
       const { title, category } = event;
       const nonSensitive = {
@@ -184,10 +191,10 @@ export class EventStore {
         latitude: event.latitude,
         longitude: event.longitude
       };
-      
+
       // Encrypt only sensitive fields
       const encrypted = await encryptEvent({ title, category }, key);
-      
+
       // Store with both unencrypted indexing fields and encrypted data
       await this.db.transaction('rw', this.db.events, async () => {
         await this.db.events.add({
@@ -212,15 +219,15 @@ export class EventStore {
       const record = await this.db.transaction('r', this.db.events, async () => {
         return await this.db.events.get(streamId);
       });
-      
+
       if (!record || !record.encryptedData || !record.iv) return undefined;
-      
+
       // Decrypt sensitive fields
       const sensitiveData = await decryptEvent({
         data: record.encryptedData,
         iv: record.iv
       }, key);
-      
+
       // Reconstruct full event with unencrypted and decrypted fields
       return {
         id: record.id,
@@ -242,7 +249,7 @@ export class EventStore {
 
   // Observer pattern for real-time updates
   private subscribers: Array<(event: Event) => void> = [];
-  
+
   /**
    * Subscribe to new events being created
    * @param callback - Function to call with each new event
@@ -254,7 +261,7 @@ export class EventStore {
       this.subscribers = this.subscribers.filter(sub => sub !== callback);
     };
   }
-  
+
   /**
    * Notify all subscribers of a new event
    * @param event - The created event
@@ -268,15 +275,15 @@ export class EventStore {
       }
     });
   }
-  
+
   // Create a new method for creating events with validation
   async create(event: Event): Promise<void> {
     try {
       // Validate the event data
       EventSchema.parse(event);
-      
+
       const key = await this.getEncryptionKey();
-      
+
       // Separate sensitive and non-sensitive fields
       const { title, category } = event;
       const nonSensitive = {
@@ -285,10 +292,10 @@ export class EventStore {
         latitude: event.latitude,
         longitude: event.longitude
       };
-      
+
       // Encrypt only sensitive fields
       const encrypted = await encryptEvent({ title, category }, key);
-      
+
       // Store with both unencrypted indexing fields and encrypted data
       await this.db.transaction('rw', this.db.events, async () => {
         await this.db.events.add({
@@ -297,7 +304,7 @@ export class EventStore {
           iv: encrypted.iv
         });
       });
-  
+
       // Notify subscribers after successful creation
       this.notifySubscribers(event);
     } catch (error) {
@@ -305,13 +312,13 @@ export class EventStore {
       if (error instanceof Error && error.name === 'ZodError') {
         throw error;
       }
-      
+
       // Handle database corruption
       if (this.isCorruptionError(error)) {
         await this.reinitialize();
         return this.create(event);
       }
-      
+
       console.error('Failed to create event:', error);
       throw new Error(`EventStore.create() failed: ${(error as Error).message}`);
     }
@@ -323,18 +330,18 @@ export class EventStore {
       const record = await this.db.transaction('r', this.db.events, async () => {
         return await this.db.events.get(streamId);
       });
-      
+
       if (!record || !record.encryptedData || !record.iv) {
         throw new Error(`Event with id ${streamId} not found`);
       }
-      
+
       // Decrypt current sensitive fields
       const key = await this.getEncryptionKey();
       const sensitiveData = await decryptEvent({
         data: record.encryptedData,
         iv: record.iv
       }, key);
-      
+
       // Build current event with unencrypted fields
       const currentEvent: Event = {
         id: record.id,
@@ -344,26 +351,27 @@ export class EventStore {
         title: sensitiveData.title,
         category: sensitiveData.category
       };
-      
+
       // Apply updates to create the new event
       const updatedEvent: Event = {
         ...currentEvent,
         ...updates
       };
-      
+
       // Validate the updated event
       EventSchema.parse(updatedEvent);
-      
-      // Encrypt updated sensitive fields
+
+      // Encrypt updated sensitive fields - add clusterId to non-sensitive storage
       const { title, category } = updatedEvent;
       const nonSensitive = {
         id: updatedEvent.id,
         timestamp: updatedEvent.timestamp,
         latitude: updatedEvent.latitude,
-        longitude: updatedEvent.longitude
+        longitude: updatedEvent.longitude,
+        clusterId: updatedEvent.clusterId
       };
       const encrypted = await encryptEvent({ title, category }, key);
-      
+
       // Update both unencrypted and encrypted data
       await this.db.transaction('rw', this.db.events, async () => {
         await this.db.events.put({
@@ -377,13 +385,13 @@ export class EventStore {
       if (error instanceof Error && error.name === 'ZodError') {
         throw error;
       }
-      
+
       // Handle database corruption
       if (this.isCorruptionError(error)) {
         await this.reinitialize();
         return this.update(streamId, updates);
       }
-      
+
       console.error('Failed to update event:', error);
       throw new Error(`EventStore.update() failed: ${(error as Error).message}`);
     }
@@ -422,12 +430,12 @@ export class EventStore {
   async list(): Promise<Event[]> {
     try {
       const key = await this.getEncryptionKey();
-      
+
       // Use indexed sorting by timestamp (newest first)
       const records = await this.db.transaction('r', this.db.events, async () => {
         return await this.db.events.orderBy('timestamp').reverse().toArray();
       });
-      
+
       const events: Event[] = [];
       for (const record of records) {
         if (record.encryptedData && record.iv) {
@@ -437,7 +445,7 @@ export class EventStore {
               data: record.encryptedData,
               iv: record.iv
             }, key);
-            
+
             // Reconstruct full event
             events.push({
               id: record.id,
@@ -454,7 +462,7 @@ export class EventStore {
           }
         }
       }
-      
+
       return events;
     } catch (error) {
       if (this.isCorruptionError(error)) {
@@ -469,12 +477,12 @@ export class EventStore {
   async search(category?: EventCategory, query?: string): Promise<Event[]> {
     try {
       let allEvents = await this.list();
-      
+
       // Filter by category if specified
       if (category) {
         allEvents = allEvents.filter(event => event.category === category);
       }
-      
+
       // Filter by search query if specified
       if (query && query.trim()) {
         const searchTerm = query.trim().toLowerCase();
@@ -483,7 +491,7 @@ export class EventStore {
           event.category.toLowerCase().includes(searchTerm)
         );
       }
-      
+
       return allEvents;
     } catch (error) {
       console.error('Failed to search events:', error);
@@ -493,14 +501,14 @@ export class EventStore {
 
   async createMany(events: Event[]): Promise<void> {
     if (!events.length) return;
-    
+
     try {
       const key = await this.getEncryptionKey();
-      
+
       await this.db.transaction('rw', this.db.events, async () => {
         for (const event of events) {
           EventSchema.parse(event);
-          
+
           // Separate sensitive and non-sensitive fields
           const { title, category } = event;
           const nonSensitive = {
@@ -509,10 +517,10 @@ export class EventStore {
             latitude: event.latitude,
             longitude: event.longitude
           };
-          
+
           // Encrypt only sensitive fields
           const encrypted = await encryptEvent({ title, category }, key);
-          
+
           // Store with both unencrypted indexing fields and encrypted data
           await this.db.events.add({
             ...nonSensitive,
@@ -526,13 +534,13 @@ export class EventStore {
       if (error instanceof Error && error.name === 'ZodError') {
         throw error;
       }
-      
+
       // Handle database corruption
       if (this.isCorruptionError(error)) {
         await this.reinitialize();
         return this.createMany(events);
       }
-      
+
       console.error('Failed to create multiple events:', error);
       throw new Error(`EventStore.createMany() failed: ${(error as Error).message}`);
     }
@@ -541,23 +549,58 @@ export class EventStore {
   /**
    * Group events into spatial clusters based on their geographic coordinates.
    * Uses the spatial clustering service to group events into continental regions.
-   * 
+   *
    * @returns Array of cluster results, each containing a group of events
    */
   async clusterEvents(): Promise<ClusterResult[]> {
     try {
       // Get all events
       const events = await this.list();
-      
-      // Convert events to GeoCoordinate format
-      const coordinates: GeoCoordinate[] = events.map(event => ({
-        latitude: event.latitude,
-        longitude: event.longitude,
-        eventId: event.id
+
+      // Convert Event[] to AugmentedEvent[]. For now, we add default augmentation fields.
+      const augmentedEvents: AugmentedEvent[] = events.map(event => ({
+        ...event,
+        confidenceScore: 1.0, // Default score
+        sourceReliability: 1.0, // Default reliability
+        vector: Array(128).fill(0).map(() => Math.random())
+        // Other fields (clusterId, region, analysisMetadata) are optional and can be undefined
       }));
-      
-      // Use the spatial clustering service to cluster the coordinates
-      return clusterCoordinates(coordinates);
+
+      // Validate each augmented event before clustering
+      const validAugmentedEvents: AugmentedEvent[] = [];
+      for (const augmentedEvent of augmentedEvents) {
+        try {
+          validateAugmentedEvent(augmentedEvent);
+          validAugmentedEvents.push(augmentedEvent);
+        } catch (validationError) {
+          console.error(`Skipping invalid event ${augmentedEvent.id} during clustering:`, validationError);
+        }
+      }
+
+      // Output the augmented event data for validation just before clustering
+      console.log('Valid Augmented Events before clustering:', validAugmentedEvents);
+
+      // Use the new function designed for AugmentedEvent objects
+      const clusters = clusterAugmentedEvents(validAugmentedEvents);
+
+      // Store cluster assignments back to events
+      for (const cluster of clusters) {
+        for (const coord of cluster.coordinates) {
+          const eventId = coord.eventId;
+          if (eventId) {
+            // Find the corresponding event and update its clusterId
+            const event = validAugmentedEvents.find(e => e.id === eventId);
+            if (event) {
+              event.clusterId = cluster.clusterId;
+              // Update the event in storage with clusterId
+              await this.update(eventId, { clusterId: cluster.clusterId });
+            }
+          }
+        }
+      }
+
+      // Return the clustering results
+      return clusters;
     } catch (error) {
       console.error('Failed to cluster events:', error);
       throw new Error(`EventStore.clusterEvents() failed: ${(error as Error).message}`);

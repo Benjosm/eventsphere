@@ -1,5 +1,6 @@
 {
   "name": "eventsphere",
+  "type": "module",
   "version": "1.0.0",
   "description": "EventSphere is a self-contained 3D visualization platform that renders real-time global events on an interactive globe, powered by AI-driven clustering for intelligent thematic navigation. Built for use cases like crisis monitoring and situational awareness, EventSphere processes event data with **local machine learning models**—ensuring complete data privacy with no external API dependencies.",
   "main": "index.js",
@@ -18,6 +19,7 @@
     "fake-indexeddb": "^6.1.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.1.6",
     "uuid": "^11.1.0",
     "vite": "^4.4.5"

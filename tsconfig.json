@@ -2,7 +2,7 @@
   "compilerOptions": {
     // Enable modern TypeScript features
     "target": "ES2020",
-    "module": "commonjs",
+    "module": "es2022",
     "lib": ["ES2020"],
     
     // Allow importing modules without strict file extensions
@@ -31,9 +31,14 @@
     // Source map generation
     "sourceMap": true
   },
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  },
   "include": [
     "backend/**/*.ts",
-    "backend/tests/**/*.ts"
+    "backend/tests/**/*.ts",
+    "src/**/*.ts"
   ],
   "exclude": [
     "node_modules",
