@@ -234,6 +234,35 @@ export class EventStore {
     }
   }
 
+  // Observer pattern for real-time updates
+  private subscribers: Array<(event: Event) => void> = [];
+  
+  /**
+   * Subscribe to new events being created
+   * @param callback - Function to call with each new event
+   * @returns Function to unsubscribe
+   */
+  subscribe(callback: (event: Event) => void): () => void {
+    this.subscribers.push(callback);
+    return () => {
+      this.subscribers = this.subscribers.filter(sub => sub !== callback);
+    };
+  }
+  
+  /**
+   * Notify all subscribers of a new event
+   * @param event - The created event
+   */
+  private notifySubscribers(event: Event): void {
+    this.subscribers.forEach(sub => {
+      try {
+        sub(event);
+      } catch (error) {
+        console.error('EventStore subscriber error:', error);
+      }
+    });
+  }
+  
   // Create a new method for creating events with validation
   async create(event: Event): Promise<void> {
     try {
@@ -262,6 +291,9 @@ export class EventStore {
           iv: encrypted.iv
         });
       });
+  
+      // Notify subscribers after successful creation
+      this.notifySubscribers(event);
     } catch (error) {
       // Re-throw validation errors as is
       if (error instanceof Error && error.name === 'ZodError') {
