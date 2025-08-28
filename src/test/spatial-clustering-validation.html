@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spatial Clustering Validation</title>
+    <script type="module">
+        import { clusterCoordinates } from '../utils/SpatialClusteringService.js';
+
+        // Define continent coordinate ranges for test data generation
+        const continentRanges = {
+            'Europe': { lat: [36, 71], lon: [-10, 60] },
+            'Asia': { lat: [10, 75], lon: [60, 180] },
+            'Africa': { lat: [-10, 45], lon: [-80, 30] },
+            'Indian Subcontinent': { lat: [4, 35], lon: [60, 95] },
+            'South America': { lat: [-55, 15], lon: [-90, -30] },
+            'North America': { lat: [15, 70], lon: [-170, -65] },
+            'Oceania': { lat: [-47, -10], lon: [113, 154] },
+            'Central America & Caribbean': { lat: [12, 37], lon: [-105, -85] },
+            'Arctic': { lat: [60, 90], lon: [-170, -60] }
+        };
+
+        // Generate a random number within a range
+        function randomInRange(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        // Generate test coordinates - 1000 total events
+        function generateTestCoordinates() {
+            const totalEvents = 1000;
+            const coordinates = [];
+            
+            // Distribute events across continents (with some left for "Other")
+            const continentDistribution = {
+                'Europe': 0.15,
+                'Asia': 0.20,
+                'Africa': 0.12,
+                'Indian Subcontinent': 0.08,
+                'South America': 0.10,
+                'North America': 0.15,
+                'Oceania': 0.05,
+                'Central America & Caribbean': 0.07,
+                'Arctic': 0.03,
+                'Other': 0.05
+            };
+
+            for (const [continent, percentage] of Object.entries(continentDistribution)) {
+                const count = Math.round(totalEvents * percentage);
+                const range = continentRanges[continent];
+                
+                for (let i = 0; i < count; i++) {
+                    let lat, lon;
+                    
+                    if (continent === 'Other') {
+                        // Generate coordinates that don't fit any specific region
+                        // Use unusual combinations that should fall outside defined bounds
+                        const option = i % 3;
+                        if (option === 0) {
+                            lat = randomInRange(-60, -50); // Just south of South America
+                            lon = randomInRange(20, 50);   // Indian Ocean
+                        } else if (option === 1) {
+                            lat = randomInRange(30, 35);   // Borderline North Africa/Middle East
+                            lon = randomInRange(35, 55);   // Middle East
+                        } else {
+                            lat = randomInRange(-10, 10);  // Equatorial
+                            lon = randomInRange(-175, -170); // Near International Date Line
+                        }
+                    } else {
+                        lat = randomInRange(range.lat[0], range.lat[1]);
+                        lon = randomInRange(range.lon[0], range.lon[1]);
+                    }
+                    
+                    coordinates.push({
+                        latitude: lat,
+                        longitude: lon,
+                        eventId: `event-${coordinates.length}`
+                    });
+                }
+            }
+            
+            return coordinates;
+        }
+
+        // Main validation function
+        async function validateClustering() {
+            try {
+                console.log('Starting spatial clustering validation with 1000 events...');
+                
+                // Generate test data
+                const testCoordinates = generateTestCoordinates();
+                console.log(`Generated ${testCoordinates.length} test events`);
+                
+                // Verify we have exactly 1000 events
+                if (testCoordinates.length !== 1000) {
+                    console.error(`❌ FAILED: Expected 1000 events, got ${testCoordinates.length}`);
+                    return;
+                }
+                
+                // Measure performance
+                console.time('clustering');
+                const clusters = clusterCoordinates(testCoordinates);
+                console.timeEnd('clustering');
+                
+                // Display results
+                console.log('\n📋 CLUSTERING RESULTS:');
+                console.log('-------------------');
+                let totalAssigned = 0;
+                
+                // Sort clusters by size for consistent output
+                const sortedClusters = [...clusters].sort((a, b) => b.coordinates.length - a.coordinates.length);
+                
+                for (const cluster of sortedClusters) {
+                    console.log(`${cluster.label}: ${cluster.coordinates.length} events (Center: ${cluster.center.latitude.toFixed(2)}, ${cluster.center.longitude.toFixed(2)})`);
+                    totalAssigned += cluster.coordinates.length;
+                }
+                
+                console.log(`\n📊 SUMMARY:`);
+                console.log(`Total clusters: ${clusters.length}`);
+                console.log(`Total assigned events: ${totalAssigned}`);
+                
+                // Verify no events were lost
+                if (totalAssigned !== 1000) {
+                    console.error(`❌ FAILED: Not all events were assigned to clusters`);
+                    return;
+                }
+                
+                // Check for expected continents
+                const expectedLabels = [
+                    'Europe', 'Asia', 'Africa', 'Indian Subcontinent',
+                    'South America', 'North America', 'Oceania',
+                    'Central America & Caribbean', 'Arctic', 'Other'
+                ];
+                
+                const foundLabels = clusters.map(c => c.label);
+                let allExpectedFound = true;
+                
+                for (const label of expectedLabels) {
+                    if (!foundLabels.includes(label)) {
+                        console.warn(`⚠️  Expected cluster not found: ${label}`);
+                        allExpectedFound = false;
+                    }
+                }
+                
+                // Performance check
+                const performanceCheck = new Promise((resolve) => {
+                    const originalTimeEnd = console.timeEnd;
+                    
+                    console.timeEnd = function(label) {
+                        if (label === 'clustering') {
+                            // Capture the output
+                            const logMessages = [];
+                            const originalLog = console.log;
+                            
+                            console.log = function(message) {
+                                logMessages.push(message);
+                                // Continue with original logging
+                                originalLog.apply(console, arguments);
+                            };
+                            
+                            // Call original timeEnd
+                            originalTimeEnd.apply(console, arguments);
+                            
+                            // Restore console.log
+                            console.log = originalLog;
+                            
+                            // Extract time from the logged message
+                            const timeMessage = logMessages.find(m => typeof m === 'string' && m.includes('clustering:'));
+                            if (timeMessage) {
+                                const timeMatch = timeMessage.match(/clustering:\s*([\d.]+)ms/);
+                                if (timeMatch) {
+                                    const time = parseFloat(timeMatch[1]);
+                                    if (time < 50) {
+                                        console.log(`✅ PERFORMANCE: Clustering completed in ${time}ms (<50ms) - PASSED`);
+                                        resolve(true);
+                                    } else {
+                                        console.error(`❌ PERFORMANCE: Clustering took ${time}ms (>=50ms) - FAILED`);
+                                        resolve(false);
+                                    }
+                                } else {
+                                    console.warn(`Could not parse timing information from: ${timeMessage}`);
+                                    resolve(false);
+                                }
+                            } else {
+                                console.warn('Could not find clustering time measurement');
+                                resolve(false);
+                            }
+                        }
+                    };
+                });
+                
+                const performancePassed = await performanceCheck;
+                
+                // Final verification
+                if (allExpectedFound && performancePassed && totalAssigned === 1000) {
+                    console.log('\n✅ SPATIAL CLUSTERING VALIDATION PASSED');
+                    console.log('All requirements met:');
+                    console.log('• 1000 events processed');
+                    console.log('• Correct continental clustering');
+                    console.log('• Performance under 50ms');
+                    console.log('• No runtime errors');
+                } else {
+                    console.log('\n❌ SPATIAL CLUSTERING VALIDATION FAILED');
+                }
+                
+            } catch (error) {
+                console.error('❌ RUNTIME ERROR during clustering:', error);
+            }
+        }
+
+        // Run validation when page loads
+        window.addEventListener('load', validateClustering);
+    </script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #0066cc;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        p {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .instructions {
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <h1>Spatial Clustering Validation</h1>
+    <p>Manual browser test for continent-based spatial clustering</p>
+    
+    <div class="instructions">
+        <h3>📋 Instructions for Manual Verification:</h3>
+        <ol>
+            <li>Open browser developer console (F12)</li>
+            <li>Refresh the page to run the test</li>
+            <li>Verify the following requirements:</li>
+            <ul>
+                <li>✅ <strong>Correctness:</strong> Cluster labels should match expected continents</li>
+                <li>✅ <strong>Completeness:</strong> All 1000 events should be assigned to clusters</li>
+                <li>✅ <strong>Performance:</strong> "clustering: Xms" should show < 50ms</li>
+                <li>✅ <strong>Stability:</strong> No errors in console output</li>
+            </ul>
+            <li>Look for the final "VALIDATION PASSED" message</li>
+        </ol>
+    </div>
+    
+    <p><strong>Status:</strong> Running validation... Please check the console for results.</p>
+</body>
+</html>

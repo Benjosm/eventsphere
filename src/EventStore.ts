@@ -3,6 +3,7 @@ import Dexie from 'dexie';
 import localForage from 'localforage';
 import { EventSchema } from '../backend/validation';
 import { encryptEvent, decryptEvent, EncryptedEventData } from './utils/encryption';
+import { clusterCoordinates, GeoCoordinate } from './utils/SpatialClusteringService';
 
 /**
  * The category of the event.
@@ -529,6 +530,32 @@ export class EventStore {
       
       console.error('Failed to create multiple events:', error);
       throw new Error(`EventStore.createMany() failed: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Group events into spatial clusters based on their geographic coordinates.
+   * Uses the spatial clustering service to group events into continental regions.
+   * 
+   * @returns Array of cluster results, each containing a group of events
+   */
+  async clusterEvents(): Promise<ClusterResult[]> {
+    try {
+      // Get all events
+      const events = await this.list();
+      
+      // Convert events to GeoCoordinate format
+      const coordinates: GeoCoordinate[] = events.map(event => ({
+        latitude: event.latitude,
+        longitude: event.longitude,
+        eventId: event.id
+      }));
+      
+      // Use the spatial clustering service to cluster the coordinates
+      return clusterCoordinates(coordinates);
+    } catch (error) {
+      console.error('Failed to cluster events:', error);
+      throw new Error(`EventStore.clusterEvents() failed: ${(error as Error).message}`);
     }
   }
 }
