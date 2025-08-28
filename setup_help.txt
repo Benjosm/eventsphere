@@ -8,18 +8,21 @@ The project has been successfully set up for development and testing. Below are 
     - `npm install` was run, which completed successfully. The frontend may not yet be set up, so no additional packages were installed.
 
 2.  **Python Dependencies:**
-    - The backend uses FastAPI, JWT authentication (`python-jose`), and Pytest.
-    - The core dependencies were initially installed using:
+    - Runtime dependencies were defined in `backend/requirements.txt`:
       ```
-      python3 -m pip install --user pytest python-dotenv uvicorn[standard] fastapi
+      fastapi>=0.68.0
+      uvicorn>=0.15.0
+      python-jose[cryptography]>=3.3.0
+      pydantic>=1.8.0
+      python-dotenv>=0.19.0
       ```
-    - The `httpx` package, required for FastAPI's `TestClient`, was installed:
+    - Installed runtime dependencies using:
       ```
-      python3 -m pip install --user httpx
+      python3 -m pip install --user -r backend/requirements.txt
       ```
-    - The `python-jose` package, required for JWT handling, was missing and has been installed:
+    - Test dependencies (required to run tests):
       ```
-      python3 -m pip install --user python-jose
+      python3 -m pip install --user pytest httpx
       ```
 
 3.  **Verification of Tests:**

@@ -1,0 +1,1 @@
+fastapi>=0.68.0\nuvicorn>=0.15.0\npython-jose[cryptography]>=3.3.0\npydantic>=1.8.0\npython-dotenv>=0.19.0
