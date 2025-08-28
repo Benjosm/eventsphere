@@ -1,6 +1,9 @@
 module.exports = {
   // The root directory used to resolve all pattern definitions
   rootDir: '.',
+  
+  // Set up test environment after frameworks are installed
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
 
   // The test environment that will be used for testing
   testEnvironment: 'node',
