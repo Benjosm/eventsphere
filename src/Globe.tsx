@@ -1,8 +1,9 @@
-import { useRef, useMemo, useEffect } from 'react';
+import { useRef, useMemo, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useLoader } from '@react-three/drei';
 import { CoordinateConversionService } from './utils/CoordinateConversionService';
+import { EventStore, Event } from './EventStore';
 import useOrbitControls from './hooks/useOrbitControls';
 
 const Globe = () => {
@@ -22,74 +23,123 @@ const Globe = () => {
     mat.color.set(0x2288ff); // Fallback color if no texture
     return mat;
   }, [colorMap]);
-
+  
   // Create a mesh Ref to reference the mesh in the scene
   const meshRef = useRef<THREE.Mesh>(null!);
-
-  const { scene } = useThree();
+  
+  const { scene, camera, gl: renderer } = useThree();
   useOrbitControls(true);
-
-  // Simulate event data with sample coordinates (in a real app, this would come from the EventDataManagement Epic)
-  const eventData = [
-    { id: 1, lat: 40.7128, lon: -74.0060, name: 'New York' }, // New York - valid
-    { id: 2, lat: 51.5074, lon: -0.1278, name: 'London' }, // London - valid
-    { id: 3, lat: 35.6762, lon: 139.6503, name: 'Tokyo' }, // Tokyo - valid
-    { id: 4, lat: -33.8688, lon: 151.2093, name: 'Sydney' }, // Sydney - valid
-    { id: 5, lat: -23.5505, lon: -46.6333, name: 'Sao Paulo' }, // Sao Paulo - valid
-    { id: 6, lat: 90, lon: 180, name: 'North Pole 180' }, // North Pole - edge case
-    { id: 7, lat: -90, lon: -180, name: 'South Pole -180' }, // South Pole - edge case
-    { id: 8, lat: 91, lon: 0, name: 'Invalid Latitude' }, // Invalid lat > 90
-    { id: 9, lat: -91, lon: 0, name: 'Invalid Negative Latitude' }, // Invalid lat < -90
-    { id: 10, lat: 0, lon: 181, name: 'Invalid Longitude' }, // Invalid lon > 180
-    { id: 11, lat: 0, lon: -181, name: 'Invalid Negative Longitude' }, // Invalid lon < -180
-    { id: 12, lat: 0, lon: 0, name: 'Equator Prime Meridian' }, // Valid - origin point
-    { id: 13, lat: 45, lon: 90, name: 'NE Hemisphere' }, // Valid - NE quadrant
-    { id: 14, lat: -45, lon: -90, name: 'SW Hemisphere' }, // Valid - SW quadrant
-  ];
-
+  
+  // Set up lighting
   useEffect(() => {
-    // Set up lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
     directionalLight.position.set(5, 5, 5);
-
+    directionalLight.castShadow = true;
+  
     scene.add(ambientLight);
     scene.add(directionalLight);
-
-    // Create markers for each event
-    eventData.forEach(event => {
-      const position = CoordinateConversionService.convertToSpherical(event.lat, event.lon);
-      
-      if (position !== null) {
-        // Create a simple sphere as a marker
-        const markerGeometry = new THREE.SphereGeometry(0.01, 16, 16);
-        const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-        const marker = new THREE.Mesh(markerGeometry, markerMaterial);
-        
-        // Position the marker on the globe surface
-        marker.position.copy(position);
-        
-        // Add the marker to the scene
-        scene.add(marker);
-      }
-    });
-
-    // Cleanup function
+  
+    // Set camera position
+    camera.position.z = 2;
+  
+    // Cleanup lighting and camera on unmount
     return () => {
       scene.remove(ambientLight);
       scene.remove(directionalLight);
-      
-      // Remove any markers that were added
-      eventData.forEach(event => {
-        const position = CoordinateConversionService.convertToSpherical(event.lat, event.lon);
-        if (position !== null) {
-          // Find and remove marker at this position (simplified - in practice you'd store references)
-          const marker = scene.getObjectByName(`marker-${event.id}`);
-          if (marker) scene.remove(marker);
-        }
-      });
     };
-  }, [scene]);
+  }, [scene, camera]);
+  
+  const [events, setEvents] = useState<Event[]>([]);
+
+  // Subscribe to real-time event data stream
+  useEffect(() => {
+    const eventStore = EventStore.getInstance();
+  
+    // Load initial events
+    eventStore.list().then(initialEvents => {
+      const validEvents = initialEvents.filter(event => {
+        return (
+          event.latitude >= -90 &&
+          event.latitude <= 90 &&
+          event.longitude >= -180 &&
+          event.longitude <= 180
+        );
+      });
+      setEvents(validEvents);
+    });
+  
+    // Subscribe to new events
+    const unsubscribe = eventStore.subscribe(event => {
+      if (
+        event.latitude >= -90 &&
+        event.latitude <= 90 &&
+        event.longitude >= -180 &&
+        event.longitude <= 180
+      ) {
+        setEvents(prevEvents => [...prevEvents, event]);
+      }
+    });
+  
+    return () => unsubscribe();
+  }, []);
+  
+  // Create InstancedMesh for markers
+  const markerRef = useRef<THREE.InstancedMesh>(null!);
+  
+  const markerGeometry = useMemo(() => new THREE.ConeGeometry(0.01, 0.05, 8), []);
+  const markerMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: 0xff0000 }), []);
+  
+  // Create InstancedMesh once
+  useEffect(() => {
+    if (markerRef.current) return; // Already initialized
+  
+    const instancedMesh = new THREE.InstancedMesh(markerGeometry, markerMaterial, 10000);
+    instancedMesh.frustumCulled = false;
+    scene.add(instancedMesh);
+    markerRef.current = instancedMesh;
+  
+    return () => {
+      if (markerRef.current) {
+        scene.remove(markerRef.current);
+        markerRef.current.geometry.dispose();
+        markerRef.current.material.dispose();
+        markerRef.current = null!;
+      }
+    };
+  }, [scene, markerGeometry, markerMaterial]);
+
+  // Cleanup memoized resources when component unmounts
+  useEffect(() => {
+    return () => {
+      markerGeometry.dispose();
+      markerMaterial.dispose();
+    };
+  }, []);
+
+  // Update markers when events change
+  useEffect(() => {
+    if (!markerRef.current) return;
+  
+    const dummy = new THREE.Object3D();
+    let instanceId = 0;
+  
+    events.forEach(event => {
+      const position = CoordinateConversionService.convertToSpherical(
+        event.latitude,
+        event.longitude
+      );
+      if (position !== null) {
+        dummy.position.copy(position).multiplyScalar(1.01);
+        dummy.updateMatrix();
+        markerRef.current.setMatrixAt(instanceId, dummy.matrix);
+        instanceId++;
+      }
+    });
+  
+    markerRef.current.count = instanceId;
+    markerRef.current.instanceMatrix.needsUpdate = true;
+  }, [events]);
 
   return (
     <>
